@@ -806,6 +806,89 @@ function applyData(d) {
   ["weekend_available","irda_license","deactivate_irda_license","travel_flexible","two_wheeler","sales_comfortable","people_interaction","field_job","telecalling_comfortable"].forEach(function(k) { setRadio(k, d[k]); });
   toggleOtherOccupation(); toggleIrda();
 }
+
+function currentUiLang() {
+  var lang = "en";
+
+  try {
+    if (window.BC_I18N && typeof window.BC_I18N.payload === "function") {
+      lang = window.BC_I18N.payload();
+    } else if (window.BC_I18N && typeof window.BC_I18N.getLang === "function") {
+      lang = window.BC_I18N.getLang();
+    } else {
+      lang =
+        localStorage.getItem("preferred_language") ||
+        localStorage.getItem("bc_preferred_language") ||
+        "en";
+    }
+  } catch (e) {
+    lang = "en";
+  }
+
+  lang = String(lang || "en").toLowerCase();
+  return (lang === "hi" || lang === "hindi" || lang === "हिंदी" || lang === "हिन्दी") ? "hi" : "en";
+}
+
+function uiTranslate(value) {
+  value = String(value == null ? "" : value).trim();
+  if (!value) return "";
+
+  try {
+    if (
+      currentUiLang() === "hi" &&
+      window.BC_I18N &&
+      typeof window.BC_I18N.translate === "function"
+    ) {
+      return window.BC_I18N.translate(value);
+    }
+  } catch (e) {}
+
+  return value;
+}
+
+function roleDisplayName(role) {
+  role = String(role == null ? "" : role).trim();
+  if (!role) return "";
+
+  var key = roleKey(role);
+
+  if (key === "sales") return uiTranslate("Sales");
+  if (key === "marketing") return uiTranslate("Marketing");
+  if (key === "tele") return uiTranslate("Tele");
+
+  return uiTranslate(role);
+}
+
+function roleListDisplay(roles) {
+  return arrValue(roles)
+    .map(roleDisplayName)
+    .filter(Boolean)
+    .join(", ");
+}
+
+function duplicateRoleWarningMessage(blockedRoles, allowedRoles, allBlocked) {
+  var lang = currentUiLang();
+  var blockedText = roleListDisplay(blockedRoles);
+  var allowedText = roleListDisplay(allowedRoles);
+
+  if (!blockedText) {
+    blockedText = lang === "hi" ? "चुनी गई भूमिका/भूमिकाओं" : "the selected role(s)";
+  }
+
+  if (lang === "hi") {
+    if (allBlocked || !arrValue(allowedRoles).length) {
+      return "आपने इस ईमेल/मोबाइल नंबर से " + blockedText + " के लिए पहले ही आवेदन किया है। ये भूमिका/भूमिकाएँ फिर से नहीं चुनी जा सकतीं।";
+    }
+
+    return "आपने इस ईमेल/मोबाइल नंबर से " + blockedText + " के लिए पहले ही आवेदन किया है। ये भूमिका/भूमिकाएँ फिर से नहीं चुनी जा सकतीं। ब्लॉक की गई भूमिका/भूमिकाएँ हटा दी गई हैं। जारी रखने के लिए कृपया फिर से आगे बढ़ें पर क्लिक करें: " + allowedText + "।";
+  }
+
+  if (allBlocked || !arrValue(allowedRoles).length) {
+    return "You have already applied for " + blockedText + " with this email/mobile number. These role(s) cannot be selected again.";
+  }
+
+  return "You have already applied for " + blockedText + " with this email/mobile number. These role(s) cannot be selected again. Blocked role(s) have been removed. Please click Next again to continue with: " + allowedText + ".";
+}
 async function nextFromPage1() {
   clearError();
   var name = val("candidate_name"); var email = val("email").toLowerCase(); var mobile = digitsOnly(val("mobile")); var state = val("state"); var city = val("city"); var roles = getRoles();
@@ -822,18 +905,19 @@ async function nextFromPage1() {
     setButtonLoading(btn, false, "Checking...", "Next");
 
     if (result && (boolValue(result.duplicate_found) || boolValue(result.duplicateFound))) {
-      var blocked = arrValue(result.blocked_roles || result.blockedRoles);
-      var allowed = arrValue(result.allowed_roles || result.allowedRoles);
-      var message = result.duplicate_message || result.message || "You have already applied for the selected role(s) with this email/mobile number.";
+  var blocked = arrValue(result.blocked_roles || result.blockedRoles);
+  var allowed = arrValue(result.allowed_roles || result.allowedRoles);
+  var allBlocked = boolValue(result.all_roles_blocked) || !allowed.length;
+  var message = duplicateRoleWarningMessage(blocked, allowed, allBlocked);
 
-      if (boolValue(result.all_roles_blocked) || !allowed.length) {
-        uncheckBlockedRoles(blocked);
-        return showError(message);
-      }
+  if (allBlocked) {
+    uncheckBlockedRoles(blocked);
+    return showError(message);
+  }
 
-      applyAllowedRoles(allowed);
-      return showError(message + " Blocked role(s) have been removed. Please click Next again to continue with: " + allowed.join(", ") + ".");
-    }
+  applyAllowedRoles(allowed);
+  return showError(message);
+}
   } catch (e) {
     setButtonLoading(btn, false, "Checking...", "Next");
     return showError("Unable to verify previous applications right now. Please try again.");
